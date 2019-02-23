@@ -1,12 +1,26 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
+# compiled object files, static and dynamic libs (shared objects)
+*.o
+*.a
 *.so
-*.dylib
 
-# Test binary, build with `go test -c`
+# env
+.env*
+
+# test coverage result
+*.out
+*.html
 *.test
 
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
+# jetbrains
+.idea
+
+# app/playground folder
+app/playground
+
+vendor/*/
+
+# vscode
+.vscode/launch.json
+.vscode/settings.json
+
+
