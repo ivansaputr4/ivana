@@ -10,6 +10,14 @@
   version = "v1.1.1"
 
 [[projects]]
+  digest = "1:20bfc9287db8b7fb8f12d31468dab57187fd7e320e76d73d1865b7d1327e8424"
+  name = "github.com/jinzhu/now"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "8ec929ed50c3ac25ce77ba4486e1f277c552c591"
+  version = "v1.0.0"
+
+[[projects]]
   digest = "1:f97285a3b0a496dcf8801072622230d513f69175665d94de60eb042d03387f6c"
   name = "github.com/julienschmidt/httprouter"
   packages = ["."]
@@ -52,6 +60,7 @@
   analyzer-version = 1
   input-imports = [
     "github.com/gorilla/context",
+    "github.com/jinzhu/now",
     "github.com/julienschmidt/httprouter",
     "github.com/justinas/alice",
     "github.com/subosito/gotenv",
