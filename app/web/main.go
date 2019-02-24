@@ -173,29 +173,30 @@ func wrapHandler(h http.Handler) httprouter.Handle {
 	}
 }
 
-// Repo Office
+// Repo Venue
 
-type Office struct {
+type Venue struct {
 	Id        bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
 	Name      string        `json:"name"`
+	Rooms     []Room        `json:"rooms,omitempty"`
 	CreatedAt time.Time     `json:"created_at"`
 	UpdatedAt time.Time     `json:"updated_at"`
 }
 
-type OfficesCollection struct {
-	Data []Office `json:"data"`
+type VenuesCollection struct {
+	Data []Venue `json:"data"`
 }
 
-type OfficeResource struct {
-	Data Office `json:"data"`
+type VenueResource struct {
+	Data Venue `json:"data"`
 }
 
-type OfficeRepo struct {
+type VenueRepo struct {
 	coll *mgo.Collection
 }
 
-func (r *OfficeRepo) All() (OfficesCollection, error) {
-	result := OfficesCollection{[]Office{}}
+func (r *VenueRepo) All() (VenuesCollection, error) {
+	result := VenuesCollection{[]Venue{}}
 	err := r.coll.Find(nil).All(&result.Data)
 	if err != nil {
 		return result, err
@@ -204,8 +205,8 @@ func (r *OfficeRepo) All() (OfficesCollection, error) {
 	return result, nil
 }
 
-func (r *OfficeRepo) Find(id string) (OfficeResource, error) {
-	result := OfficeResource{}
+func (r *VenueRepo) Find(id string) (VenueResource, error) {
+	result := VenueResource{}
 	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result.Data)
 	if err != nil {
 		return result, err
@@ -214,22 +215,23 @@ func (r *OfficeRepo) Find(id string) (OfficeResource, error) {
 	return result, nil
 }
 
-func (r *OfficeRepo) Create(office *Office) error {
+func (r *VenueRepo) Create(venue *Venue) error {
 	id := bson.NewObjectId()
-	office.CreatedAt = time.Now()
-	_, err := r.coll.UpsertId(id, office)
+	venue.CreatedAt = time.Now()
+	venue.UpdatedAt = time.Now()
+	_, err := r.coll.UpsertId(id, venue)
 	if err != nil {
 		return err
 	}
 
-	office.Id = id
+	venue.Id = id
 
 	return nil
 }
 
-func (r *OfficeRepo) Update(office *Office) error {
-	office.UpdatedAt = time.Now()
-	err := r.coll.UpdateId(office.Id, office)
+func (r *VenueRepo) Update(venue *Venue) error {
+	venue.UpdatedAt = time.Now()
+	err := r.coll.UpdateId(venue.Id, venue)
 	if err != nil {
 		return err
 	}
@@ -237,7 +239,7 @@ func (r *OfficeRepo) Update(office *Office) error {
 	return nil
 }
 
-func (r *OfficeRepo) Delete(id string) error {
+func (r *VenueRepo) Delete(id string) error {
 	err := r.coll.RemoveId(bson.ObjectIdHex(id))
 	if err != nil {
 		return err
@@ -252,32 +254,41 @@ type appContext struct {
 	db *mgo.Database
 }
 
-// Office Handlers
+// Venue Handlers
 
-func (c *appContext) officesHandler(w http.ResponseWriter, r *http.Request) {
-	repo := OfficeRepo{c.db.C("offices")}
-	offices, err := repo.All()
+func (c *appContext) venuesHandler(w http.ResponseWriter, r *http.Request) {
+	repo := VenueRepo{c.db.C("venues")}
+	roomRepo := RoomRepo{c.db.C("rooms")}
+	venues, err := repo.All()
 	if err != nil {
 		panic(err)
 	}
 
-	WriteSuccess(w, http.StatusOK, offices)
+	for idx, venue := range venues.Data {
+		rooms, err := roomRepo.AllByVenueId(venue.Id.Hex())
+		if err != nil {
+			panic(err)
+		}
+		venues.Data[idx].Rooms = rooms.Data
+	}
+
+	WriteSuccess(w, http.StatusOK, venues)
 }
 
-func (c *appContext) officeHandler(w http.ResponseWriter, r *http.Request) {
+func (c *appContext) venueHandler(w http.ResponseWriter, r *http.Request) {
 	params := context.Get(r, "params").(httprouter.Params)
-	repo := OfficeRepo{c.db.C("offices")}
-	office, err := repo.Find(params.ByName("id"))
+	repo := VenueRepo{c.db.C("venues")}
+	venue, err := repo.Find(params.ByName("id"))
 	if err != nil {
 		panic(err)
 	}
 
-	WriteSuccess(w, http.StatusOK, office)
+	WriteSuccess(w, http.StatusOK, venue)
 }
 
-func (c *appContext) createOfficeHandler(w http.ResponseWriter, r *http.Request) {
-	body := context.Get(r, "body").(*OfficeResource)
-	repo := OfficeRepo{c.db.C("offices")}
+func (c *appContext) createVenueHandler(w http.ResponseWriter, r *http.Request) {
+	body := context.Get(r, "body").(*VenueResource)
+	repo := VenueRepo{c.db.C("venues")}
 	err := repo.Create(&body.Data)
 	if err != nil {
 		panic(err)
@@ -286,11 +297,11 @@ func (c *appContext) createOfficeHandler(w http.ResponseWriter, r *http.Request)
 	WriteSuccess(w, http.StatusCreated, body)
 }
 
-func (c *appContext) updateOfficeHandler(w http.ResponseWriter, r *http.Request) {
+func (c *appContext) updateVenueHandler(w http.ResponseWriter, r *http.Request) {
 	params := context.Get(r, "params").(httprouter.Params)
-	body := context.Get(r, "body").(*OfficeResource)
+	body := context.Get(r, "body").(*VenueResource)
 	body.Data.Id = bson.ObjectIdHex(params.ByName("id"))
-	repo := OfficeRepo{c.db.C("offices")}
+	repo := VenueRepo{c.db.C("venues")}
 	err := repo.Update(&body.Data)
 	if err != nil {
 		panic(err)
@@ -299,15 +310,15 @@ func (c *appContext) updateOfficeHandler(w http.ResponseWriter, r *http.Request)
 	WriteSuccess(w, http.StatusAccepted, body)
 }
 
-func (c *appContext) deleteOfficeHandler(w http.ResponseWriter, r *http.Request) {
+func (c *appContext) deleteVenueHandler(w http.ResponseWriter, r *http.Request) {
 	params := context.Get(r, "params").(httprouter.Params)
-	repo := OfficeRepo{c.db.C("offices")}
+	repo := VenueRepo{c.db.C("venues")}
 	err := repo.Delete(params.ByName("id"))
 	if err != nil {
 		panic(err)
 	}
 
-	data := MessageSuccess{MessageInfo{Message: "Office has been deleted successfully"}}
+	data := MessageSuccess{MessageInfo{Message: "Venue has been deleted successfully"}}
 	WriteSuccess(w, http.StatusAccepted, data)
 }
 
@@ -316,7 +327,8 @@ func (c *appContext) deleteOfficeHandler(w http.ResponseWriter, r *http.Request)
 type Room struct {
 	Id        bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
 	Name      string        `json:"name"`
-	OfficeId  string        `json:"office_id"`
+	VenueId   string        `json:"venue_id"`
+	Capacity  string        `json:"capacity"`
 	CreatedAt time.Time     `json:"created_at"`
 	UpdatedAt time.Time     `json:"updated_at"`
 }
@@ -356,6 +368,7 @@ func (r *RoomRepo) Find(id string) (RoomResource, error) {
 func (r *RoomRepo) Create(room *Room) error {
 	id := bson.NewObjectId()
 	room.CreatedAt = time.Now()
+	room.UpdatedAt = time.Now()
 	_, err := r.coll.UpsertId(id, room)
 	if err != nil {
 		return err
@@ -385,13 +398,14 @@ func (r *RoomRepo) Delete(id string) error {
 	return nil
 }
 
-func (r *RoomRepo) AllByOfficeId(officeId string) (RoomsCollection, error) {
+func (r *RoomRepo) AllByVenueId(venueId string) (RoomsCollection, error) {
 	result := RoomsCollection{[]Room{}}
-	err := r.coll.Find(bson.M{"office_id": officeId}).All(&result.Data)
+	fmt.Println(venueId)
+	err := r.coll.Find(bson.M{"venueid": venueId}).All(&result.Data)
 	if err != nil {
 		return result, err
 	}
-
+	fmt.Println(result)
 	return result, nil
 }
 
@@ -454,10 +468,10 @@ func (c *appContext) deleteRoomHandler(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, http.StatusAccepted, data)
 }
 
-func (c *appContext) roomsOfficeHandler(w http.ResponseWriter, r *http.Request) {
+func (c *appContext) roomsVenueHandler(w http.ResponseWriter, r *http.Request) {
 	params := context.Get(r, "params").(httprouter.Params)
 	repo := RoomRepo{c.db.C("rooms")}
-	rooms, err := repo.AllByOfficeId(params.ByName("office_id"))
+	rooms, err := repo.AllByVenueId(params.ByName("id"))
 	if err != nil {
 		panic(err)
 	}
@@ -517,6 +531,7 @@ func (r *AppointmentRepo) Find(id string) (AppointmentResource, error) {
 func (r *AppointmentRepo) Create(appointment *Appointment) error {
 	id := bson.NewObjectId()
 	appointment.CreatedAt = time.Now()
+	appointment.UpdatedAt = time.Now()
 	_, err := r.coll.UpsertId(id, appointment)
 	if err != nil {
 		return err
@@ -646,19 +661,20 @@ func main() {
 	defer session.Close()
 	session.SetMode(mgo.Monotonic, true)
 
+	// Index
 	appC := appContext{session.DB("ivana")}
 	commonHandlers := alice.New(context.ClearHandler, loggingHandler, recoverHandler, acceptHandler)
 	router := NewRouter()
 
 	// Routing
 
-	router.Get("/offices/:id", commonHandlers.ThenFunc(appC.officeHandler))
-	router.Patch("/offices/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(OfficeResource{})).ThenFunc(appC.updateOfficeHandler))
-	router.Delete("/offices/:id", commonHandlers.ThenFunc(appC.deleteOfficeHandler))
-	router.Get("/offices", commonHandlers.ThenFunc(appC.officesHandler))
-	router.Post("/offices", commonHandlers.Append(contentTypeHandler, bodyHandler(OfficeResource{})).ThenFunc(appC.createOfficeHandler))
+	router.Get("/venues/:id", commonHandlers.ThenFunc(appC.venueHandler))
+	router.Patch("/venues/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(VenueResource{})).ThenFunc(appC.updateVenueHandler))
+	router.Delete("/venues/:id", commonHandlers.ThenFunc(appC.deleteVenueHandler))
+	router.Get("/venues", commonHandlers.ThenFunc(appC.venuesHandler))
+	router.Post("/venues", commonHandlers.Append(contentTypeHandler, bodyHandler(VenueResource{})).ThenFunc(appC.createVenueHandler))
 
-	router.Get("/offices/:id/rooms", commonHandlers.ThenFunc(appC.roomsOfficeHandler))
+	router.Get("/venues/:id/rooms", commonHandlers.ThenFunc(appC.roomsVenueHandler))
 
 	router.Get("/rooms/:id", commonHandlers.ThenFunc(appC.roomHandler))
 	router.Patch("/rooms/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(RoomResource{})).ThenFunc(appC.updateRoomHandler))
