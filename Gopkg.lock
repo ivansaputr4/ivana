@@ -35,11 +35,14 @@
 
 [[projects]]
   branch = "v2"
-  digest = "1:2642fd0b6900c77247d61d80cf2eb59a374ef4ffc2d25a1b95b87dc355b2894e"
+  digest = "1:988de7520a09024d5d94cd99bd545afbf194893994ec759b1cda0a0bbb6adb80"
   name = "gopkg.in/mgo.v2"
   packages = [
+    ".",
     "bson",
     "internal/json",
+    "internal/sasl",
+    "internal/scram",
   ]
   pruneopts = "UT"
   revision = "9856a29383ce1c59f308dd1cf0363a79b5bef6b5"
@@ -52,6 +55,7 @@
     "github.com/julienschmidt/httprouter",
     "github.com/justinas/alice",
     "github.com/subosito/gotenv",
+    "gopkg.in/mgo.v2",
     "gopkg.in/mgo.v2/bson",
   ]
   solver-name = "gps-cdcl"

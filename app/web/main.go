@@ -2,87 +2,21 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"reflect"
 	"time"
 
 	"github.com/gorilla/context"
 	"github.com/julienschmidt/httprouter"
 	"github.com/justinas/alice"
+	mgo "gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 
 	"github.com/subosito/gotenv"
 )
-
-// Repo
-
-type Office struct {
-	Id   bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
-	Name string        `json:"name"`
-}
-
-type OfficesCollection struct {
-	Data []Office `json:"data"`
-}
-
-type OfficeResource struct {
-	Data Office `json:"data"`
-}
-
-type OfficeRepo struct {
-	coll *mgo.Collection
-}
-
-func (r *OfficeRepo) All() (OfficesCollection, error) {
-	result := OfficesCollection{[]Office{}}
-	err := r.coll.Find(nil).All(&result.Data)
-	if err != nil {
-		return result, err
-	}
-
-	return result, nil
-}
-
-func (r *OfficeRepo) Find(id string) (OfficeResource, error) {
-	result := OfficeResource{}
-	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result.Data)
-	if err != nil {
-		return result, err
-	}
-
-	return result, nil
-}
-
-func (r *OfficeRepo) Create(office *Office) error {
-	id := bson.NewObjectId()
-	_, err := r.coll.UpsertId(id, office)
-	if err != nil {
-		return err
-	}
-
-	office.Id = id
-
-	return nil
-}
-
-func (r *OfficeRepo) Update(office *Office) error {
-	err := r.coll.UpdateId(office.Id, office)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (r *OfficeRepo) Delete(id string) error {
-	err := r.coll.RemoveId(bson.ObjectIdHex(id))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
 
 // Errors
 
@@ -109,6 +43,22 @@ var (
 	ErrUnsupportedMediaType = &Error{"unsupported_media_type", 415, "Unsupported Media Type", "Content-Type header must be set to: 'application/vnd.api+json'."}
 	ErrInternalServer       = &Error{"internal_server_error", 500, "Internal Server Error", "Something went wrong."}
 )
+
+// Response Success
+
+type MessageSuccess struct {
+	Data MessageInfo `json:"data"`
+}
+
+type MessageInfo struct {
+	Message string `json:"message`
+}
+
+func WriteSuccess(w http.ResponseWriter, httpStatus int, data interface{}) {
+	w.Header().Set("Content-Type", "application/vnd.api+json")
+	w.WriteHeader(httpStatus)
+	json.NewEncoder(w).Encode(data)
+}
 
 // Middlewares
 
@@ -189,76 +139,6 @@ func bodyHandler(v interface{}) func(http.Handler) http.Handler {
 	return m
 }
 
-// Main handlers
-
-type appContext struct {
-	db *mgo.Database
-}
-
-func (c *appContext) officesHandler(w http.ResponseWriter, r *http.Request) {
-	repo := OfficeRepo{c.db.C("offices")}
-	offices, err := repo.All()
-	if err != nil {
-		panic(err)
-	}
-
-	w.Header().Set("Content-Type", "application/vnd.api+json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(offices)
-}
-
-func (c *appContext) officeHandler(w http.ResponseWriter, r *http.Request) {
-	params := context.Get(r, "params").(httprouter.Params)
-	repo := OfficeRepo{c.db.C("offices")}
-	office, err := repo.Find(params.ByName("id"))
-	if err != nil {
-		panic(err)
-	}
-
-	w.Header().Set("Content-Type", "application/vnd.api+json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(office)
-}
-
-func (c *appContext) createOfficeHandler(w http.ResponseWriter, r *http.Request) {
-	body := context.Get(r, "body").(*OfficeResource)
-	repo := OfficeRepo{c.db.C("offices")}
-	err := repo.Create(&body.Data)
-	if err != nil {
-		panic(err)
-	}
-
-	w.Header().Set("Content-Type", "application/vnd.api+json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(body)
-}
-
-func (c *appContext) updateOfficeHandler(w http.ResponseWriter, r *http.Request) {
-	params := context.Get(r, "params").(httprouter.Params)
-	body := context.Get(r, "body").(*OfficeResource)
-	body.Data.Id = bson.ObjectIdHex(params.ByName("id"))
-	repo := OfficeRepo{c.db.C("offices")}
-	err := repo.Update(&body.Data)
-	if err != nil {
-		panic(err)
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-	w.Write([]byte("\n"))
-}
-
-func (c *appContext) deleteOfficeHandler(w http.ResponseWriter, r *http.Request) {
-	params := context.Get(r, "params").(httprouter.Params)
-	repo := OfficeRepo{c.db.C("offices")}
-	err := repo.Delete(params.ByName("id"))
-	if err != nil {
-		panic(err)
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-	w.Write([]byte("\n"))
-}
-
 // Router
 
 type router struct {
@@ -273,8 +153,8 @@ func (r *router) Post(path string, handler http.Handler) {
 	r.POST(path, wrapHandler(handler))
 }
 
-func (r *router) Put(path string, handler http.Handler) {
-	r.PUT(path, wrapHandler(handler))
+func (r *router) Patch(path string, handler http.Handler) {
+	r.PATCH(path, wrapHandler(handler))
 }
 
 func (r *router) Delete(path string, handler http.Handler) {
@@ -292,6 +172,290 @@ func wrapHandler(h http.Handler) httprouter.Handle {
 	}
 }
 
+// Repo Office
+
+type Office struct {
+	Id   bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
+	Name string        `json:"name"`
+}
+
+type OfficesCollection struct {
+	Data []Office `json:"data"`
+}
+
+type OfficeResource struct {
+	Data Office `json:"data"`
+}
+
+type OfficeRepo struct {
+	coll *mgo.Collection
+}
+
+func (r *OfficeRepo) All() (OfficesCollection, error) {
+	result := OfficesCollection{[]Office{}}
+	err := r.coll.Find(nil).All(&result.Data)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+func (r *OfficeRepo) Find(id string) (OfficeResource, error) {
+	result := OfficeResource{}
+	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result.Data)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+func (r *OfficeRepo) Create(office *Office) error {
+	id := bson.NewObjectId()
+	_, err := r.coll.UpsertId(id, office)
+	if err != nil {
+		return err
+	}
+
+	office.Id = id
+
+	return nil
+}
+
+func (r *OfficeRepo) Update(office *Office) error {
+	err := r.coll.UpdateId(office.Id, office)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *OfficeRepo) Delete(id string) error {
+	err := r.coll.RemoveId(bson.ObjectIdHex(id))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Main handlers
+
+type appContext struct {
+	db *mgo.Database
+}
+
+// Office Handlers
+
+func (c *appContext) officesHandler(w http.ResponseWriter, r *http.Request) {
+	repo := OfficeRepo{c.db.C("offices")}
+	offices, err := repo.All()
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusOK, offices)
+}
+
+func (c *appContext) officeHandler(w http.ResponseWriter, r *http.Request) {
+	params := context.Get(r, "params").(httprouter.Params)
+	repo := OfficeRepo{c.db.C("offices")}
+	office, err := repo.Find(params.ByName("id"))
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusOK, office)
+}
+
+func (c *appContext) createOfficeHandler(w http.ResponseWriter, r *http.Request) {
+	body := context.Get(r, "body").(*OfficeResource)
+	repo := OfficeRepo{c.db.C("offices")}
+	err := repo.Create(&body.Data)
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusCreated, body)
+}
+
+func (c *appContext) updateOfficeHandler(w http.ResponseWriter, r *http.Request) {
+	params := context.Get(r, "params").(httprouter.Params)
+	body := context.Get(r, "body").(*OfficeResource)
+	body.Data.Id = bson.ObjectIdHex(params.ByName("id"))
+	repo := OfficeRepo{c.db.C("offices")}
+	err := repo.Update(&body.Data)
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusAccepted, body)
+}
+
+func (c *appContext) deleteOfficeHandler(w http.ResponseWriter, r *http.Request) {
+	params := context.Get(r, "params").(httprouter.Params)
+	repo := OfficeRepo{c.db.C("offices")}
+	err := repo.Delete(params.ByName("id"))
+	if err != nil {
+		panic(err)
+	}
+
+	data := MessageSuccess{MessageInfo{Message: "Office has been deleted successfully"}}
+	WriteSuccess(w, http.StatusAccepted, data)
+}
+
+// Repo Room
+
+type Room struct {
+	Id       bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
+	Name     string        `json:"name"`
+	OfficeId string        `json:office_id`
+}
+
+type RoomsCollection struct {
+	Data []Room `json:"data"`
+}
+
+type RoomResource struct {
+	Data Room `json:"data"`
+}
+
+type RoomRepo struct {
+	coll *mgo.Collection
+}
+
+func (r *RoomRepo) All() (RoomsCollection, error) {
+	result := RoomsCollection{[]Room{}}
+	err := r.coll.Find(nil).All(&result.Data)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+func (r *RoomRepo) Find(id string) (RoomResource, error) {
+	result := RoomResource{}
+	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result.Data)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+func (r *RoomRepo) Create(room *Room) error {
+	id := bson.NewObjectId()
+	_, err := r.coll.UpsertId(id, room)
+	if err != nil {
+		return err
+	}
+
+	room.Id = id
+
+	return nil
+}
+
+func (r *RoomRepo) Update(room *Room) error {
+	err := r.coll.UpdateId(room.Id, room)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *RoomRepo) Delete(id string) error {
+	err := r.coll.RemoveId(bson.ObjectIdHex(id))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *RoomRepo) AllByOfficeId(officeId string) (RoomsCollection, error) {
+	result := RoomsCollection{[]Room{}}
+	err := r.coll.Find(bson.M{"office_id": officeId}).All(&result.Data)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+// Room Handlers
+
+func (c *appContext) roomsHandler(w http.ResponseWriter, r *http.Request) {
+	repo := RoomRepo{c.db.C("rooms")}
+	rooms, err := repo.All()
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusOK, rooms)
+}
+
+func (c *appContext) roomHandler(w http.ResponseWriter, r *http.Request) {
+	params := context.Get(r, "params").(httprouter.Params)
+	repo := RoomRepo{c.db.C("rooms")}
+	room, err := repo.Find(params.ByName("id"))
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusOK, room)
+}
+
+func (c *appContext) createRoomHandler(w http.ResponseWriter, r *http.Request) {
+	body := context.Get(r, "body").(*RoomResource)
+	repo := RoomRepo{c.db.C("rooms")}
+	err := repo.Create(&body.Data)
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusCreated, body)
+}
+
+func (c *appContext) updateRoomHandler(w http.ResponseWriter, r *http.Request) {
+	params := context.Get(r, "params").(httprouter.Params)
+	body := context.Get(r, "body").(*RoomResource)
+	body.Data.Id = bson.ObjectIdHex(params.ByName("id"))
+	repo := RoomRepo{c.db.C("rooms")}
+	err := repo.Update(&body.Data)
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusAccepted, body)
+}
+
+func (c *appContext) deleteRoomHandler(w http.ResponseWriter, r *http.Request) {
+	params := context.Get(r, "params").(httprouter.Params)
+	repo := RoomRepo{c.db.C("rooms")}
+	err := repo.Delete(params.ByName("id"))
+	if err != nil {
+		panic(err)
+	}
+
+	data := MessageSuccess{MessageInfo{Message: "Room has been deleted successfully"}}
+	WriteSuccess(w, http.StatusAccepted, data)
+}
+
+func (c *appContext) roomsOfficeHandler(w http.ResponseWriter, r *http.Request) {
+	params := context.Get(r, "params").(httprouter.Params)
+	repo := RoomRepo{c.db.C("rooms")}
+	rooms, err := repo.AllByOfficeId(params.ByName("office_id"))
+	if err != nil {
+		panic(err)
+	}
+
+	WriteSuccess(w, http.StatusOK, rooms)
+}
+
 func main() {
 	gotenv.Load()
 
@@ -305,10 +469,29 @@ func main() {
 	appC := appContext{session.DB("ivana")}
 	commonHandlers := alice.New(context.ClearHandler, loggingHandler, recoverHandler, acceptHandler)
 	router := NewRouter()
+
+	// Routing
+
 	router.Get("/offices/:id", commonHandlers.ThenFunc(appC.officeHandler))
-	router.Put("/offices/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(OfficeResource{})).ThenFunc(appC.updateOfficeHandler))
+	router.Patch("/offices/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(OfficeResource{})).ThenFunc(appC.updateOfficeHandler))
 	router.Delete("/offices/:id", commonHandlers.ThenFunc(appC.deleteOfficeHandler))
 	router.Get("/offices", commonHandlers.ThenFunc(appC.officesHandler))
 	router.Post("/offices", commonHandlers.Append(contentTypeHandler, bodyHandler(OfficeResource{})).ThenFunc(appC.createOfficeHandler))
-	http.ListenAndServe(":8080", router)
+
+	router.Get("/offices/:id/rooms", commonHandlers.ThenFunc(appC.roomsOfficeHandler))
+
+	router.Get("/rooms/:id", commonHandlers.ThenFunc(appC.roomHandler))
+	router.Patch("/rooms/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(RoomResource{})).ThenFunc(appC.updateRoomHandler))
+	router.Delete("/rooms/:id", commonHandlers.ThenFunc(appC.deleteRoomHandler))
+	router.Get("/rooms", commonHandlers.ThenFunc(appC.roomsHandler))
+	router.Post("/rooms", commonHandlers.Append(contentTypeHandler, bodyHandler(RoomResource{})).ThenFunc(appC.createRoomHandler))
+
+	port := os.Getenv("PORT")
+	msg := fmt.Sprintf("Listening at port %s", port)
+	msgport := fmt.Sprintf(":%s", port)
+
+	if os.Getenv("ENV") == "development" || os.Getenv("ENV") == "staging" {
+		log.Println(msg)
+	}
+	log.Fatal(http.ListenAndServe(msgport, router))
 }
