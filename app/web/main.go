@@ -690,7 +690,7 @@ func (c *appContext) createEventHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	fmt.Println("Event created: %s\n", ev.HtmlLink)
 
-	WriteSuccess(w, http.StatusCreated, body)
+	WriteSuccess(w, http.StatusCreated, event)
 }
 
 func (c *appContext) updateEventHandler(w http.ResponseWriter, r *http.Request) {
