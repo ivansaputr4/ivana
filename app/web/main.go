@@ -653,6 +653,7 @@ func (c *appContext) createEventHandler(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		panic(err)
 	}
+	body.Id = event.Id
 
 	WriteSuccess(w, http.StatusCreated, body)
 }
