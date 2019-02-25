@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"reflect"
-	"strconv"
 	"time"
 
 	"github.com/gorilla/context"
@@ -34,6 +33,7 @@ type Error struct {
 
 func WriteError(w http.ResponseWriter, err *Error) {
 	w.Header().Set("Content-Type", "application/vnd.api+json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(err.Status)
 	json.NewEncoder(w).Encode(Errors{[]*Error{err}})
 }
@@ -57,6 +57,7 @@ type MessageInfo struct {
 
 func WriteSuccess(w http.ResponseWriter, httpStatus int, data interface{}) {
 	w.Header().Set("Content-Type", "application/vnd.api+json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(httpStatus)
 	json.NewEncoder(w).Encode(data)
 }
@@ -89,31 +90,31 @@ func loggingHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func acceptHandler(next http.Handler) http.Handler {
-	fn := func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Accept") != "application/vnd.api+json" {
-			WriteError(w, ErrNotAcceptable)
-			return
-		}
+// func acceptHandler(next http.Handler) http.Handler {
+// 	fn := func(w http.ResponseWriter, r *http.Request) {
+// 		if r.Header.Get("Accept") != "application/vnd.api+json" {
+// 			WriteError(w, ErrNotAcceptable)
+// 			return
+// 		}
 
-		next.ServeHTTP(w, r)
-	}
+// 		next.ServeHTTP(w, r)
+// 	}
 
-	return http.HandlerFunc(fn)
-}
+// 	return http.HandlerFunc(fn)
+// }
 
-func contentTypeHandler(next http.Handler) http.Handler {
-	fn := func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Content-Type") != "application/vnd.api+json" {
-			WriteError(w, ErrUnsupportedMediaType)
-			return
-		}
+// func contentTypeHandler(next http.Handler) http.Handler {
+// 	fn := func(w http.ResponseWriter, r *http.Request) {
+// 		if r.Header.Get("Content-Type") != "application/vnd.api+json" {
+// 			WriteError(w, ErrUnsupportedMediaType)
+// 			return
+// 		}
 
-		next.ServeHTTP(w, r)
-	}
+// 		next.ServeHTTP(w, r)
+// 	}
 
-	return http.HandlerFunc(fn)
-}
+// 	return http.HandlerFunc(fn)
+// }
 
 func bodyHandler(v interface{}) func(http.Handler) http.Handler {
 	t := reflect.TypeOf(v)
@@ -176,28 +177,18 @@ func wrapHandler(h http.Handler) httprouter.Handle {
 // Repo Venue
 
 type Venue struct {
-	Id        bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
-	Name      string        `json:"name"`
-	Rooms     []Room        `json:"rooms,omitempty"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
-}
-
-type VenuesCollection struct {
-	Data []Venue `json:"data"`
-}
-
-type VenueResource struct {
-	Data Venue `json:"data"`
+	Id    bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
+	Name  string        `json:"name"`
+	Rooms []Room        `json:"rooms,omitempty"`
 }
 
 type VenueRepo struct {
 	coll *mgo.Collection
 }
 
-func (r *VenueRepo) All() (VenuesCollection, error) {
-	result := VenuesCollection{[]Venue{}}
-	err := r.coll.Find(nil).All(&result.Data)
+func (r *VenueRepo) All() ([]Venue, error) {
+	result := []Venue{}
+	err := r.coll.Find(nil).All(&result)
 	if err != nil {
 		return result, err
 	}
@@ -205,9 +196,9 @@ func (r *VenueRepo) All() (VenuesCollection, error) {
 	return result, nil
 }
 
-func (r *VenueRepo) Find(id string) (VenueResource, error) {
-	result := VenueResource{}
-	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result.Data)
+func (r *VenueRepo) Find(id string) (Venue, error) {
+	result := Venue{}
+	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result)
 	if err != nil {
 		return result, err
 	}
@@ -217,8 +208,6 @@ func (r *VenueRepo) Find(id string) (VenueResource, error) {
 
 func (r *VenueRepo) Create(venue *Venue) error {
 	id := bson.NewObjectId()
-	venue.CreatedAt = time.Now()
-	venue.UpdatedAt = time.Now()
 	_, err := r.coll.UpsertId(id, venue)
 	if err != nil {
 		return err
@@ -230,7 +219,6 @@ func (r *VenueRepo) Create(venue *Venue) error {
 }
 
 func (r *VenueRepo) Update(venue *Venue) error {
-	venue.UpdatedAt = time.Now()
 	err := r.coll.UpdateId(venue.Id, venue)
 	if err != nil {
 		return err
@@ -264,12 +252,12 @@ func (c *appContext) venuesHandler(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
-	for idx, venue := range venues.Data {
+	for idx, venue := range venues {
 		rooms, err := roomRepo.AllByVenueId(venue.Id.Hex())
 		if err != nil {
 			panic(err)
 		}
-		venues.Data[idx].Rooms = rooms.Data
+		venues[idx].Rooms = rooms
 	}
 
 	WriteSuccess(w, http.StatusOK, venues)
@@ -287,9 +275,9 @@ func (c *appContext) venueHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *appContext) createVenueHandler(w http.ResponseWriter, r *http.Request) {
-	body := context.Get(r, "body").(*VenueResource)
+	body := context.Get(r, "body").(*Venue)
 	repo := VenueRepo{c.db.C("venues")}
-	err := repo.Create(&body.Data)
+	err := repo.Create(body)
 	if err != nil {
 		panic(err)
 	}
@@ -299,10 +287,10 @@ func (c *appContext) createVenueHandler(w http.ResponseWriter, r *http.Request) 
 
 func (c *appContext) updateVenueHandler(w http.ResponseWriter, r *http.Request) {
 	params := context.Get(r, "params").(httprouter.Params)
-	body := context.Get(r, "body").(*VenueResource)
-	body.Data.Id = bson.ObjectIdHex(params.ByName("id"))
+	body := context.Get(r, "body").(*Venue)
+	body.Id = bson.ObjectIdHex(params.ByName("id"))
 	repo := VenueRepo{c.db.C("venues")}
-	err := repo.Update(&body.Data)
+	err := repo.Update(body)
 	if err != nil {
 		panic(err)
 	}
@@ -325,29 +313,19 @@ func (c *appContext) deleteVenueHandler(w http.ResponseWriter, r *http.Request) 
 // Repo Room
 
 type Room struct {
-	Id        bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
-	Name      string        `json:"name"`
-	VenueId   string        `json:"venue_id"`
-	Capacity  string        `json:"capacity"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
-}
-
-type RoomsCollection struct {
-	Data []Room `json:"data"`
-}
-
-type RoomResource struct {
-	Data Room `json:"data"`
+	Id       bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
+	Name     string        `json:"name"`
+	VenueId  string        `json:"venue_id"`
+	Capacity string        `json:"capacity"`
 }
 
 type RoomRepo struct {
 	coll *mgo.Collection
 }
 
-func (r *RoomRepo) All() (RoomsCollection, error) {
-	result := RoomsCollection{[]Room{}}
-	err := r.coll.Find(nil).All(&result.Data)
+func (r *RoomRepo) All() ([]Room, error) {
+	result := []Room{}
+	err := r.coll.Find(nil).All(&result)
 	if err != nil {
 		return result, err
 	}
@@ -355,9 +333,9 @@ func (r *RoomRepo) All() (RoomsCollection, error) {
 	return result, nil
 }
 
-func (r *RoomRepo) Find(id string) (RoomResource, error) {
-	result := RoomResource{}
-	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result.Data)
+func (r *RoomRepo) Find(id string) (Room, error) {
+	result := Room{}
+	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result)
 	if err != nil {
 		return result, err
 	}
@@ -367,8 +345,6 @@ func (r *RoomRepo) Find(id string) (RoomResource, error) {
 
 func (r *RoomRepo) Create(room *Room) error {
 	id := bson.NewObjectId()
-	room.CreatedAt = time.Now()
-	room.UpdatedAt = time.Now()
 	_, err := r.coll.UpsertId(id, room)
 	if err != nil {
 		return err
@@ -380,7 +356,6 @@ func (r *RoomRepo) Create(room *Room) error {
 }
 
 func (r *RoomRepo) Update(room *Room) error {
-	room.UpdatedAt = time.Now()
 	err := r.coll.UpdateId(room.Id, room)
 	if err != nil {
 		return err
@@ -398,14 +373,12 @@ func (r *RoomRepo) Delete(id string) error {
 	return nil
 }
 
-func (r *RoomRepo) AllByVenueId(venueId string) (RoomsCollection, error) {
-	result := RoomsCollection{[]Room{}}
-	fmt.Println(venueId)
-	err := r.coll.Find(bson.M{"venueid": venueId}).All(&result.Data)
+func (r *RoomRepo) AllByVenueId(venueId string) ([]Room, error) {
+	result := []Room{}
+	err := r.coll.Find(bson.M{"venueid": venueId}).All(&result)
 	if err != nil {
 		return result, err
 	}
-	fmt.Println(result)
 	return result, nil
 }
 
@@ -433,9 +406,9 @@ func (c *appContext) roomHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *appContext) createRoomHandler(w http.ResponseWriter, r *http.Request) {
-	body := context.Get(r, "body").(*RoomResource)
+	body := context.Get(r, "body").(*Room)
 	repo := RoomRepo{c.db.C("rooms")}
-	err := repo.Create(&body.Data)
+	err := repo.Create(body)
 	if err != nil {
 		panic(err)
 	}
@@ -444,11 +417,12 @@ func (c *appContext) createRoomHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *appContext) updateRoomHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println(context.Get(r, "body"))
 	params := context.Get(r, "params").(httprouter.Params)
-	body := context.Get(r, "body").(*RoomResource)
-	body.Data.Id = bson.ObjectIdHex(params.ByName("id"))
+	body := context.Get(r, "body").(*Room)
+	body.Id = bson.ObjectIdHex(params.ByName("id"))
 	repo := RoomRepo{c.db.C("rooms")}
-	err := repo.Update(&body.Data)
+	err := repo.Update(body)
 	if err != nil {
 		panic(err)
 	}
@@ -479,38 +453,44 @@ func (c *appContext) roomsVenueHandler(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, http.StatusOK, rooms)
 }
 
-// Repo Appointment
+// Repo Event
 
-type Appointment struct {
-	Id              bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
-	AppointmentName string        `json:"appointment_name"`
-	RoomId          string        `json:"room_id"`
-	AppointmentDesc string        `json:"appointment_description"`
-	GuestIds        []string      `json:"guest_ids"`
-	Owner           bool          `json:"owner"`
-	StartTime       time.Time     `json:"start_time"`
-	EndTime         time.Time     `json:"end_time"`
-	CreatedAt       time.Time     `json:"created_at"`
-	UpdatedAt       time.Time     `json:"updated_at"`
+type Event struct {
+	Id          bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
+	Name        string        `json:"name"`
+	LocationID  string        `json:"location_id"`
+	Location    string        `json:"location"`
+	Description string        `json:"description"`
+	Guests      []string      `json:"guests"`
+	Owner       string        `json:"owner"`
+	StartTime   time.Time     `json:"start_time"`
+	EndTime     time.Time     `json:"end_time"`
 }
 
-type AppointmentsCollection struct {
-	Data []Appointment `json:"data"`
+type EventResponse struct {
+	Id          bson.ObjectId `json:"id,omitempty"`
+	Name        string        `json:"name"`
+	LocationID  string        `json:"location_id"`
+	Location    string        `json:"location"`
+	Description string        `json:"description"`
+	Guests      []string      `json:"guests"`
+	Owner       string        `json:"owner"`
+	Date        int           `json:"date"`
+	Month       int           `json:"month"`
+	Year        int           `json:"year"`
+	StartHour   int           `json:"start_hour"`
+	StartMinute int           `json:"start_minute"`
+	EndHour     int           `json:"end_hour"`
+	EndMinute   int           `json:"end_minute"`
 }
 
-type AppointmentResource struct {
-	Data Appointment `json:"data"`
-}
-
-type AppointmentRepo struct {
+type EventRepo struct {
 	coll *mgo.Collection
 }
 
-func (r *AppointmentRepo) All() (AppointmentsCollection, error) {
-	result := AppointmentsCollection{[]Appointment{}}
-	beginningOfMonth := now.BeginningOfMonth()
-	endOfMonth := now.EndOfMonth()
-	err := r.coll.Find(bson.M{"start_time": bson.M{"$gte": beginningOfMonth, "$lte": endOfMonth}}).All(&result.Data)
+func (r *EventRepo) All(start_time time.Time, end_time time.Time) ([]Event, error) {
+	result := []Event{}
+	err := r.coll.Find(bson.M{"starttime": bson.M{"$gte": start_time, "$lte": end_time}}).All(&result)
 	if err != nil {
 		return result, err
 	}
@@ -518,9 +498,9 @@ func (r *AppointmentRepo) All() (AppointmentsCollection, error) {
 	return result, nil
 }
 
-func (r *AppointmentRepo) Find(id string) (AppointmentResource, error) {
-	result := AppointmentResource{}
-	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result.Data)
+func (r *EventRepo) Find(id string) (Event, error) {
+	result := Event{}
+	err := r.coll.FindId(bson.ObjectIdHex(id)).One(&result)
 	if err != nil {
 		return result, err
 	}
@@ -528,23 +508,20 @@ func (r *AppointmentRepo) Find(id string) (AppointmentResource, error) {
 	return result, nil
 }
 
-func (r *AppointmentRepo) Create(appointment *Appointment) error {
+func (r *EventRepo) Create(event *Event) error {
 	id := bson.NewObjectId()
-	appointment.CreatedAt = time.Now()
-	appointment.UpdatedAt = time.Now()
-	_, err := r.coll.UpsertId(id, appointment)
+	_, err := r.coll.UpsertId(id, event)
 	if err != nil {
 		return err
 	}
 
-	appointment.Id = id
+	event.Id = id
 
 	return nil
 }
 
-func (r *AppointmentRepo) Update(appointment *Appointment) error {
-	appointment.UpdatedAt = time.Now()
-	err := r.coll.UpdateId(appointment.Id, appointment)
+func (r *EventRepo) Update(event *Event) error {
+	err := r.coll.UpdateId(event.Id, event)
 	if err != nil {
 		return err
 	}
@@ -552,7 +529,7 @@ func (r *AppointmentRepo) Update(appointment *Appointment) error {
 	return nil
 }
 
-func (r *AppointmentRepo) Delete(id string) error {
+func (r *EventRepo) Delete(id string) error {
 	err := r.coll.RemoveId(bson.ObjectIdHex(id))
 	if err != nil {
 		return err
@@ -561,16 +538,22 @@ func (r *AppointmentRepo) Delete(id string) error {
 	return nil
 }
 
-func (r *AppointmentRepo) Search(roomIds []string, owner bool, guestId string) (AppointmentsCollection, error) {
-	result := AppointmentsCollection{[]Appointment{}}
+func (r *EventRepo) Search(roomIds []string, owner string, guests string) ([]Event, error) {
+	result := []Event{}
+	beginningOfWeek := now.BeginningOfWeek()
+	endOfWeek := now.EndOfWeek()
+
 	err := r.coll.Find(bson.M{
 		"room_id": bson.M{
 			"$in": roomIds,
 		}, "$or": []bson.M{
 			{"owner": owner},
-			{"guest_ids": guestId},
+			{"guests": guests},
+		}, "start_time": bson.M{
+			"$gte": beginningOfWeek,
+			"$lte": endOfWeek,
 		},
-	}).All(&result.Data)
+	}).All(&result)
 	if err != nil {
 		return result, err
 	}
@@ -578,33 +561,100 @@ func (r *AppointmentRepo) Search(roomIds []string, owner bool, guestId string) (
 	return result, nil
 }
 
-// Appointment Handlers
+// Event Handlers
 
-func (c *appContext) appointmentsHandler(w http.ResponseWriter, r *http.Request) {
-	repo := AppointmentRepo{c.db.C("appointments")}
-	appointments, err := repo.All()
+func (c *appContext) eventsHandler(w http.ResponseWriter, r *http.Request) {
+	repo := EventRepo{c.db.C("events")}
+	loc := time.FixedZone("UTC+7", 7*60*60)
+	start_time := now.BeginningOfWeek()
+	if r.URL.Query().Get("start_time") != "" {
+		start_time, _ = time.Parse(time.RFC3339, r.URL.Query().Get("start_time"))
+		start_time = start_time.In(loc)
+		fmt.Println(start_time)
+	}
+	end_time := now.EndOfWeek()
+	if r.URL.Query().Get("end_time") != "" {
+		end_time, _ = time.Parse(time.RFC3339, r.URL.Query().Get("end_time"))
+		end_time = end_time.In(loc)
+		fmt.Println(end_time)
+	}
+
+	events, err := repo.All(start_time, end_time)
+	fmt.Println(events)
 	if err != nil {
 		panic(err)
 	}
 
-	WriteSuccess(w, http.StatusOK, appointments)
+	// results := []EventResponse{}
+	// for idx, event := range events {
+	// 	fmt.Println(results)
+	// 	fmt.Println(results[idx])
+	// 	fmt.Println("asdvadsv")
+	// 	results[idx].Id = event.Id
+	// 	results[idx].Name = event.Name
+	// 	results[idx].LocationID = event.LocationID
+	// 	results[idx].Location = event.Location
+	// 	results[idx].Description = event.Description
+	// 	results[idx].Guests = event.Guests
+	// 	results[idx].Owner = event.Owner
+	// 	results[idx].Date = event.StartTime.Day()
+	// 	results[idx].Month = int(event.StartTime.Month())
+	// 	results[idx].Year = event.StartTime.Year()
+	// 	results[idx].StartHour = event.StartTime.Hour()
+	// 	results[idx].StartMinute = event.StartTime.Minute()
+	// 	results[idx].EndHour = event.EndTime.Hour()
+	// 	results[idx].EndMinute = event.EndTime.Minute()
+	// }
+	// fmt.Println(results)
+
+	// WriteSuccess(w, http.StatusOK, results)
+	WriteSuccess(w, http.StatusOK, events)
 }
 
-func (c *appContext) appointmentHandler(w http.ResponseWriter, r *http.Request) {
+func (c *appContext) eventHandler(w http.ResponseWriter, r *http.Request) {
 	params := context.Get(r, "params").(httprouter.Params)
-	repo := AppointmentRepo{c.db.C("appointments")}
-	appointment, err := repo.Find(params.ByName("id"))
+	repo := EventRepo{c.db.C("events")}
+	event, err := repo.Find(params.ByName("id"))
 	if err != nil {
 		panic(err)
 	}
 
-	WriteSuccess(w, http.StatusOK, appointment)
+	eventRes := EventResponse{
+		Id:          event.Id,
+		Name:        event.Name,
+		LocationID:  event.LocationID,
+		Location:    event.Location,
+		Description: event.Description,
+		Guests:      event.Guests,
+		Owner:       event.Owner,
+		Date:        event.StartTime.Day(),
+		Month:       int(event.StartTime.Month()),
+		Year:        event.StartTime.Year(),
+		StartHour:   event.StartTime.Hour(),
+		StartMinute: event.StartTime.Minute(),
+		EndHour:     event.EndTime.Hour(),
+		EndMinute:   event.EndTime.Minute(),
+	}
+
+	WriteSuccess(w, http.StatusOK, eventRes)
 }
 
-func (c *appContext) createAppointmentHandler(w http.ResponseWriter, r *http.Request) {
-	body := context.Get(r, "body").(*AppointmentResource)
-	repo := AppointmentRepo{c.db.C("appointments")}
-	err := repo.Create(&body.Data)
+func (c *appContext) createEventHandler(w http.ResponseWriter, r *http.Request) {
+	loc := time.FixedZone("UTC+7", 7*60*60)
+	body := context.Get(r, "body").(*EventResponse)
+	event := Event{
+		Name:        body.Name,
+		LocationID:  body.LocationID,
+		Location:    body.Location,
+		Description: body.Description,
+		Guests:      body.Guests,
+		Owner:       body.Owner,
+		StartTime:   time.Date(body.Year, time.Month(body.Month), body.Date, body.StartHour, body.StartMinute, 0, 0, loc),
+		EndTime:     time.Date(body.Year, time.Month(body.Month), body.Date, body.EndHour, body.EndMinute, 0, 0, loc),
+	}
+
+	repo := EventRepo{c.db.C("events")}
+	err := repo.Create(&event)
 	if err != nil {
 		panic(err)
 	}
@@ -612,12 +662,24 @@ func (c *appContext) createAppointmentHandler(w http.ResponseWriter, r *http.Req
 	WriteSuccess(w, http.StatusCreated, body)
 }
 
-func (c *appContext) updateAppointmentHandler(w http.ResponseWriter, r *http.Request) {
+func (c *appContext) updateEventHandler(w http.ResponseWriter, r *http.Request) {
+	loc := time.FixedZone("UTC+7", 7*60*60)
 	params := context.Get(r, "params").(httprouter.Params)
-	body := context.Get(r, "body").(*AppointmentResource)
-	body.Data.Id = bson.ObjectIdHex(params.ByName("id"))
-	repo := AppointmentRepo{c.db.C("appointments")}
-	err := repo.Update(&body.Data)
+	body := context.Get(r, "body").(*EventResponse)
+	event := Event{
+		Id:          bson.ObjectIdHex(params.ByName("id")),
+		Name:        body.Name,
+		LocationID:  body.LocationID,
+		Location:    body.Location,
+		Description: body.Description,
+		Guests:      body.Guests,
+		Owner:       body.Owner,
+		StartTime:   time.Date(body.Year, time.Month(body.Month), body.Date, body.StartHour, body.StartMinute, 0, 0, loc),
+		EndTime:     time.Date(body.Year, time.Month(body.Month), body.Date, body.EndHour, body.EndMinute, 0, 0, loc),
+	}
+
+	repo := EventRepo{c.db.C("events")}
+	err := repo.Update(&event)
 	if err != nil {
 		panic(err)
 	}
@@ -625,31 +687,54 @@ func (c *appContext) updateAppointmentHandler(w http.ResponseWriter, r *http.Req
 	WriteSuccess(w, http.StatusAccepted, body)
 }
 
-func (c *appContext) deleteAppointmentHandler(w http.ResponseWriter, r *http.Request) {
+func (c *appContext) deleteEventHandler(w http.ResponseWriter, r *http.Request) {
 	params := context.Get(r, "params").(httprouter.Params)
-	repo := AppointmentRepo{c.db.C("appointments")}
+	repo := EventRepo{c.db.C("events")}
 	err := repo.Delete(params.ByName("id"))
 	if err != nil {
 		panic(err)
 	}
 
-	data := MessageSuccess{MessageInfo{Message: "Appointment has been deleted successfully"}}
+	data := MessageSuccess{MessageInfo{Message: "Event has been deleted successfully"}}
 	WriteSuccess(w, http.StatusAccepted, data)
 }
 
-func (c *appContext) searchAppointmentsHandler(w http.ResponseWriter, r *http.Request) {
-	params := context.Get(r, "params").(httprouter.Params)
-	roomIds := r.URL.Query()["room_ids[]"]
-	owner, _ := strconv.ParseBool(params.ByName("owner"))
-	guestId := params.ByName("guest_id")
-	repo := AppointmentRepo{c.db.C("appointments")}
-	appointments, err := repo.Search(roomIds, owner, guestId)
-	if err != nil {
-		panic(err)
-	}
+// func (c *appContext) searchEventsHandler(w http.ResponseWriter, r *http.Request) {
+// 	params := context.Get(r, "params").(httprouter.Params)
+// 	roomIds := r.URL.Query()["room_ids[]"]
+// 	owner := params.ByName("owner")
+// 	guests := params.ByName("guests")
+// 	fmt.Println(roomIds)
+// 	fmt.Println(owner)
+// 	fmt.Println(owner)
+// 	repo := EventRepo{c.db.C("events")}
+// 	events, err := repo.Search(roomIds, owner, guests)
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	WriteSuccess(w, http.StatusOK, appointments)
-}
+// 	result := []Event{[]EventResponse{}}
+// 	for idx, event := range events {
+// 		result[idx] = EventResponse{
+// 			Id:          event.Id,
+// 			Name:        event.Name,
+// 			LocationID:  event.LocationID,
+// 			Location:    event.Location,
+// 			Description: event.Description,
+// 			Guests:      event.Guests,
+// 			Owner:       event.Owner,
+// 			Date:        event.StartTime.Day(),
+// 			Month:       int(event.StartTime.Month()),
+// 			Year:        event.StartTime.Year(),
+// 			StartHour:   event.StartTime.Hour(),
+// 			StartMinute: event.StartTime.Minute(),
+// 			EndHour:     event.EndTime.Hour(),
+// 			EndMinute:   event.EndTime.Minute(),
+// 		}
+// 	}
+
+// 	WriteSuccess(w, http.StatusOK, result)
+// }
 
 func main() {
 	gotenv.Load()
@@ -663,31 +748,30 @@ func main() {
 
 	// Index
 	appC := appContext{session.DB("ivana")}
-	commonHandlers := alice.New(context.ClearHandler, loggingHandler, recoverHandler, acceptHandler)
+	commonHandlers := alice.New(context.ClearHandler, loggingHandler, recoverHandler)
 	router := NewRouter()
 
 	// Routing
 
 	router.Get("/venues/:id", commonHandlers.ThenFunc(appC.venueHandler))
-	router.Patch("/venues/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(VenueResource{})).ThenFunc(appC.updateVenueHandler))
+	router.Patch("/venues/:id", commonHandlers.Append(bodyHandler(Venue{})).ThenFunc(appC.updateVenueHandler))
 	router.Delete("/venues/:id", commonHandlers.ThenFunc(appC.deleteVenueHandler))
 	router.Get("/venues", commonHandlers.ThenFunc(appC.venuesHandler))
-	router.Post("/venues", commonHandlers.Append(contentTypeHandler, bodyHandler(VenueResource{})).ThenFunc(appC.createVenueHandler))
+	router.Post("/venues", commonHandlers.Append(bodyHandler(Venue{})).ThenFunc(appC.createVenueHandler))
 
 	router.Get("/venues/:id/rooms", commonHandlers.ThenFunc(appC.roomsVenueHandler))
 
 	router.Get("/rooms/:id", commonHandlers.ThenFunc(appC.roomHandler))
-	router.Patch("/rooms/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(RoomResource{})).ThenFunc(appC.updateRoomHandler))
+	router.Patch("/rooms/:id", commonHandlers.Append(bodyHandler(Room{})).ThenFunc(appC.updateRoomHandler))
 	router.Delete("/rooms/:id", commonHandlers.ThenFunc(appC.deleteRoomHandler))
 	router.Get("/rooms", commonHandlers.ThenFunc(appC.roomsHandler))
-	router.Post("/rooms", commonHandlers.Append(contentTypeHandler, bodyHandler(RoomResource{})).ThenFunc(appC.createRoomHandler))
+	router.Post("/rooms", commonHandlers.Append(bodyHandler(Room{})).ThenFunc(appC.createRoomHandler))
 
-	router.Get("/appointments/:id", commonHandlers.ThenFunc(appC.appointmentHandler))
-	router.Patch("/appointments/:id", commonHandlers.Append(contentTypeHandler, bodyHandler(AppointmentResource{})).ThenFunc(appC.updateAppointmentHandler))
-	router.Delete("/appointments/:id", commonHandlers.ThenFunc(appC.deleteAppointmentHandler))
-	router.Get("/appointments", commonHandlers.ThenFunc(appC.appointmentsHandler))
-	router.Post("/appointments", commonHandlers.Append(contentTypeHandler, bodyHandler(AppointmentResource{})).ThenFunc(appC.createAppointmentHandler))
-	router.Get("/search-appointments", commonHandlers.ThenFunc(appC.searchAppointmentsHandler))
+	router.Get("/events/:id", commonHandlers.ThenFunc(appC.eventHandler))
+	router.Patch("/events/:id", commonHandlers.Append(bodyHandler(EventResponse{})).ThenFunc(appC.updateEventHandler))
+	router.Delete("/events/:id", commonHandlers.ThenFunc(appC.deleteEventHandler))
+	router.Post("/events", commonHandlers.Append(bodyHandler(EventResponse{})).ThenFunc(appC.createEventHandler))
+	router.Get("/events", commonHandlers.ThenFunc(appC.eventsHandler))
 
 	port := os.Getenv("PORT")
 	msg := fmt.Sprintf("Listening at port %s", port)
