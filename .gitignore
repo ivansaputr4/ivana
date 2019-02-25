@@ -10,6 +10,7 @@
 *.out
 *.html
 *.test
+*.json
 
 # jetbrains
 .idea

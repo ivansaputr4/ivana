@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -16,10 +17,14 @@ import (
 	"github.com/subosito/gotenv"
 	mgo "gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+
+	ncontext "golang.org/x/net/context"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/calendar/v3"
 )
 
 // Errors
-
 type Errors struct {
 	Errors []*Error `json:"errors"`
 }
@@ -46,7 +51,6 @@ var (
 )
 
 // Response Success
-
 type MessageSuccess struct {
 	Data MessageInfo `json:"data"`
 }
@@ -63,7 +67,6 @@ func WriteSuccess(w http.ResponseWriter, httpStatus int, data interface{}) {
 }
 
 // Middlewares
-
 func recoverHandler(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -91,29 +94,29 @@ func loggingHandler(next http.Handler) http.Handler {
 }
 
 // func acceptHandler(next http.Handler) http.Handler {
-// 	fn := func(w http.ResponseWriter, r *http.Request) {
-// 		if r.Header.Get("Accept") != "application/vnd.api+json" {
-// 			WriteError(w, ErrNotAcceptable)
-// 			return
-// 		}
+//      fn := func(w http.ResponseWriter, r *http.Request) {
+//              if r.Header.Get("Accept") != "application/vnd.api+json" {
+//                      WriteError(w, ErrNotAcceptable)
+//                      return
+//              }
 
-// 		next.ServeHTTP(w, r)
-// 	}
+//              next.ServeHTTP(w, r)
+//      }
 
-// 	return http.HandlerFunc(fn)
+//      return http.HandlerFunc(fn)
 // }
 
 // func contentTypeHandler(next http.Handler) http.Handler {
-// 	fn := func(w http.ResponseWriter, r *http.Request) {
-// 		if r.Header.Get("Content-Type") != "application/vnd.api+json" {
-// 			WriteError(w, ErrUnsupportedMediaType)
-// 			return
-// 		}
+//      fn := func(w http.ResponseWriter, r *http.Request) {
+//              if r.Header.Get("Content-Type") != "application/vnd.api+json" {
+//                      WriteError(w, ErrUnsupportedMediaType)
+//                      return
+//              }
 
-// 		next.ServeHTTP(w, r)
-// 	}
+//              next.ServeHTTP(w, r)
+//      }
 
-// 	return http.HandlerFunc(fn)
+//      return http.HandlerFunc(fn)
 // }
 
 func bodyHandler(v interface{}) func(http.Handler) http.Handler {
@@ -142,7 +145,6 @@ func bodyHandler(v interface{}) func(http.Handler) http.Handler {
 }
 
 // Router
-
 type router struct {
 	*httprouter.Router
 }
@@ -174,8 +176,12 @@ func wrapHandler(h http.Handler) httprouter.Handle {
 	}
 }
 
-// Repo Venue
+// Main handlers
+type appContext struct {
+	db *mgo.Database
+}
 
+// Repo Venue
 type Venue struct {
 	Id    bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
 	Name  string        `json:"name"`
@@ -236,14 +242,7 @@ func (r *VenueRepo) Delete(id string) error {
 	return nil
 }
 
-// Main handlers
-
-type appContext struct {
-	db *mgo.Database
-}
-
 // Venue Handlers
-
 func (c *appContext) venuesHandler(w http.ResponseWriter, r *http.Request) {
 	repo := VenueRepo{c.db.C("venues")}
 	roomRepo := RoomRepo{c.db.C("rooms")}
@@ -311,7 +310,6 @@ func (c *appContext) deleteVenueHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // Repo Room
-
 type Room struct {
 	Id       bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
 	Name     string        `json:"name"`
@@ -383,7 +381,6 @@ func (r *RoomRepo) AllByVenueId(venueId string) ([]Room, error) {
 }
 
 // Room Handlers
-
 func (c *appContext) roomsHandler(w http.ResponseWriter, r *http.Request) {
 	repo := RoomRepo{c.db.C("rooms")}
 	rooms, err := repo.All()
@@ -454,7 +451,6 @@ func (c *appContext) roomsVenueHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Repo Event
-
 type Event struct {
 	Id          bson.ObjectId `json:"id,omitempty" bson:"_id,omitempty"`
 	Name        string        `json:"name"`
@@ -562,7 +558,6 @@ func (r *EventRepo) Search(roomIds []string, owner string, guests string) ([]Eve
 }
 
 // Event Handlers
-
 func (c *appContext) eventsHandler(w http.ResponseWriter, r *http.Request) {
 	repo := EventRepo{c.db.C("events")}
 	loc := time.FixedZone("UTC+7", 7*60*60)
@@ -584,22 +579,22 @@ func (c *appContext) eventsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// results := []EventResponse{}
 	// for _, event := range events {
-	// 	results = append(results, EventResponse{
-	// 		Id:          event.Id,
-	// 		Name:        event.Name,
-	// 		LocationID:  event.LocationID,
-	// 		Location:    event.Location,
-	// 		Description: event.Description,
-	// 		Guests:      event.Guests,
-	// 		Owner:       event.Owner,
-	// 		Date:        event.StartTime.Day(),
-	// 		Month:       int(event.StartTime.Month()),
-	// 		Year:        event.StartTime.Year(),
-	// 		StartHour:   event.StartTime.Hour(),
-	// 		StartMinute: event.StartTime.Minute(),
-	// 		EndHour:     event.EndTime.Hour(),
-	// 		EndMinute:   event.EndTime.Minute(),
-	// 	})
+	//      results = append(results, EventResponse{
+	//              Id:          event.Id,
+	//              Name:        event.Name,
+	//              LocationID:  event.LocationID,
+	//              Location:    event.Location,
+	//              Description: event.Description,
+	//              Guests:      event.Guests,
+	//              Owner:       event.Owner,
+	//              Date:        event.StartTime.Day(),
+	//              Month:       int(event.StartTime.Month()),
+	//              Year:        event.StartTime.Year(),
+	//              StartHour:   event.StartTime.Hour(),
+	//              StartMinute: event.StartTime.Minute(),
+	//              EndHour:     event.EndTime.Hour(),
+	//              EndMinute:   event.EndTime.Minute(),
+	//      })
 	// }
 	// WriteSuccess(w, http.StatusOK, results)
 
@@ -655,6 +650,46 @@ func (c *appContext) createEventHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	body.Id = event.Id
 
+	// create event in gcal
+	client := getClient()
+
+	srv, err := calendar.New(client)
+	if err != nil {
+		log.Fatalf("Unable to retrieve Calendar client: %v", err)
+		panic(err)
+	}
+
+	attendees := []*calendar.EventAttendee{}
+	for _, guest := range event.Guests {
+		attendees = append(attendees, &calendar.EventAttendee{Email: guest})
+	}
+	fmt.Println(event.StartTime.Format("2006-01-02T15:04:05-07:00"))
+	fmt.Println(event.EndTime.Format("2006-01-02T15:04:05-07:00"))
+
+	ev := &calendar.Event{
+		Summary:     event.Name,
+		Location:    event.Location,
+		Description: event.Description,
+		Start: &calendar.EventDateTime{
+			DateTime: event.StartTime.Format("2006-01-02T15:04:05-07:00"),
+			TimeZone: "Asia/Bangkok",
+		},
+		End: &calendar.EventDateTime{
+			DateTime: event.EndTime.Format("2006-01-02T15:04:05-07:00"),
+			TimeZone: "Asia/Bangkok",
+		},
+		Recurrence: []string{},
+		Attendees:  attendees,
+	}
+
+	calendarId := "primary"
+	ev, err = srv.Events.Insert(calendarId, ev).Do()
+	if err != nil {
+		log.Fatalf("Unable to create event. %v\n", err)
+		panic(err)
+	}
+	fmt.Println("Event created: %s\n", ev.HtmlLink)
+
 	WriteSuccess(w, http.StatusCreated, body)
 }
 
@@ -696,41 +731,107 @@ func (c *appContext) deleteEventHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // func (c *appContext) searchEventsHandler(w http.ResponseWriter, r *http.Request) {
-// 	params := context.Get(r, "params").(httprouter.Params)
-// 	roomIds := r.URL.Query()["room_ids[]"]
-// 	owner := params.ByName("owner")
-// 	guests := params.ByName("guests")
-// 	fmt.Println(roomIds)
-// 	fmt.Println(owner)
-// 	fmt.Println(owner)
-// 	repo := EventRepo{c.db.C("events")}
-// 	events, err := repo.Search(roomIds, owner, guests)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+//      params := context.Get(r, "params").(httprouter.Params)
+//      roomIds := r.URL.Query()["room_ids[]"]
+//      owner := params.ByName("owner")
+//      guests := params.ByName("guests")
+//      fmt.Println(roomIds)
+//      fmt.Println(owner)
+//      fmt.Println(owner)
+//      repo := EventRepo{c.db.C("events")}
+//      events, err := repo.Search(roomIds, owner, guests)
+//      if err != nil {
+//              panic(err)
+//      }
 
-// 	result := []Event{[]EventResponse{}}
-// 	for idx, event := range events {
-// 		result[idx] = EventResponse{
-// 			Id:          event.Id,
-// 			Name:        event.Name,
-// 			LocationID:  event.LocationID,
-// 			Location:    event.Location,
-// 			Description: event.Description,
-// 			Guests:      event.Guests,
-// 			Owner:       event.Owner,
-// 			Date:        event.StartTime.Day(),
-// 			Month:       int(event.StartTime.Month()),
-// 			Year:        event.StartTime.Year(),
-// 			StartHour:   event.StartTime.Hour(),
-// 			StartMinute: event.StartTime.Minute(),
-// 			EndHour:     event.EndTime.Hour(),
-// 			EndMinute:   event.EndTime.Minute(),
-// 		}
-// 	}
+//      result := []Event{[]EventResponse{}}
+//      for idx, event := range events {
+//              result[idx] = EventResponse{
+//                      Id:          event.Id,
+//                      Name:        event.Name,
+//                      LocationID:  event.LocationID,
+//                      Location:    event.Location,
+//                      Description: event.Description,
+//                      Guests:      event.Guests,
+//                      Owner:       event.Owner,
+//                      Date:        event.StartTime.Day(),
+//                      Month:       int(event.StartTime.Month()),
+//                      Year:        event.StartTime.Year(),
+//                      StartHour:   event.StartTime.Hour(),
+//                      StartMinute: event.StartTime.Minute(),
+//                      EndHour:     event.EndTime.Hour(),
+//                      EndMinute:   event.EndTime.Minute(),
+//              }
+//      }
 
-// 	WriteSuccess(w, http.StatusOK, result)
+//      WriteSuccess(w, http.StatusOK, result)
 // }
+
+// Retrieve a token, saves the token, then returns the generated client.
+func getClient() *http.Client {
+	b, err := ioutil.ReadFile("credentials.json")
+	if err != nil {
+		log.Fatalf("Unable to read client secret file: %v", err)
+	}
+
+	// If modifying these scopes, delete your previously saved token.json.
+	config, err := google.ConfigFromJSON(b, calendar.CalendarScope)
+	if err != nil {
+		log.Fatalf("Unable to parse client secret file to config: %v", err)
+	}
+
+	// The file token.json stores the user's access and refresh tokens, and is
+	// created automatically when the authorization flow completes for the first
+	// time.
+	tokFile := "token.json"
+	tok, err := tokenFromFile(tokFile)
+	if err != nil {
+		tok = getTokenFromWeb(config)
+		saveToken(tokFile, tok)
+	}
+	return config.Client(ncontext.Background(), tok)
+}
+
+// Request a token from the web, then returns the retrieved token.
+func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
+	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+	fmt.Printf("Go to the following link in your browser then type the "+
+		"authorization code: \n%v\n", authURL)
+
+	var authCode string
+	if _, err := fmt.Scan(&authCode); err != nil {
+		log.Fatalf("Unable to read authorization code: %v", err)
+	}
+
+	tok, err := config.Exchange(ncontext.TODO(), authCode)
+	if err != nil {
+		log.Fatalf("Unable to retrieve token from web: %v", err)
+	}
+	return tok
+}
+
+// Retrieves a token from a local file.
+func tokenFromFile(file string) (*oauth2.Token, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	tok := &oauth2.Token{}
+	err = json.NewDecoder(f).Decode(tok)
+	return tok, err
+}
+
+// Saves a token to a file path.
+func saveToken(path string, token *oauth2.Token) {
+	fmt.Printf("Saving credential file to: %s\n", path)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		log.Fatalf("Unable to cache oauth token: %v", err)
+	}
+	defer f.Close()
+	json.NewEncoder(f).Encode(token)
+}
 
 func main() {
 	gotenv.Load()
