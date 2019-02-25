@@ -570,44 +570,39 @@ func (c *appContext) eventsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("start_time") != "" {
 		start_time, _ = time.Parse(time.RFC3339, r.URL.Query().Get("start_time"))
 		start_time = start_time.In(loc)
-		fmt.Println(start_time)
 	}
 	end_time := now.EndOfWeek()
 	if r.URL.Query().Get("end_time") != "" {
 		end_time, _ = time.Parse(time.RFC3339, r.URL.Query().Get("end_time"))
 		end_time = end_time.In(loc)
-		fmt.Println(end_time)
 	}
 
 	events, err := repo.All(start_time, end_time)
-	fmt.Println(events)
 	if err != nil {
 		panic(err)
 	}
 
 	// results := []EventResponse{}
-	// for idx, event := range events {
-	// 	fmt.Println(results)
-	// 	fmt.Println(results[idx])
-	// 	fmt.Println("asdvadsv")
-	// 	results[idx].Id = event.Id
-	// 	results[idx].Name = event.Name
-	// 	results[idx].LocationID = event.LocationID
-	// 	results[idx].Location = event.Location
-	// 	results[idx].Description = event.Description
-	// 	results[idx].Guests = event.Guests
-	// 	results[idx].Owner = event.Owner
-	// 	results[idx].Date = event.StartTime.Day()
-	// 	results[idx].Month = int(event.StartTime.Month())
-	// 	results[idx].Year = event.StartTime.Year()
-	// 	results[idx].StartHour = event.StartTime.Hour()
-	// 	results[idx].StartMinute = event.StartTime.Minute()
-	// 	results[idx].EndHour = event.EndTime.Hour()
-	// 	results[idx].EndMinute = event.EndTime.Minute()
+	// for _, event := range events {
+	// 	results = append(results, EventResponse{
+	// 		Id:          event.Id,
+	// 		Name:        event.Name,
+	// 		LocationID:  event.LocationID,
+	// 		Location:    event.Location,
+	// 		Description: event.Description,
+	// 		Guests:      event.Guests,
+	// 		Owner:       event.Owner,
+	// 		Date:        event.StartTime.Day(),
+	// 		Month:       int(event.StartTime.Month()),
+	// 		Year:        event.StartTime.Year(),
+	// 		StartHour:   event.StartTime.Hour(),
+	// 		StartMinute: event.StartTime.Minute(),
+	// 		EndHour:     event.EndTime.Hour(),
+	// 		EndMinute:   event.EndTime.Minute(),
+	// 	})
 	// }
-	// fmt.Println(results)
-
 	// WriteSuccess(w, http.StatusOK, results)
+
 	WriteSuccess(w, http.StatusOK, events)
 }
 
